@@ -20,7 +20,7 @@ func runClient(serverAddr string, logFile io.Writer, done chan struct{}) error {
 	}()
 
 	buf := make([]byte, 1024)
-	ticker := time.NewTicker(100 * time.Millisecond)
+	ticker := time.NewTicker(time.Duration(*timeout) * time.Millisecond)
 
 	printErrors := true
 
@@ -41,7 +41,7 @@ func runClient(serverAddr string, logFile io.Writer, done chan struct{}) error {
 			continue
 		}
 
-		conn.SetReadDeadline(t.Add(100 * time.Millisecond))
+		conn.SetReadDeadline(t.Add(time.Duration(*timeout) * time.Millisecond))
 		n, err := conn.Read(buf)
 		if err != nil || string(buf[:n]) != tString {
 			if err == nil {

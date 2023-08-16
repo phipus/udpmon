@@ -12,6 +12,7 @@ var (
 	listenAddress = flag.String("listen", "", "specify an address to listen on")
 	serverAddress = flag.String("server", "", "specify the destination server")
 	logFile       = flag.String("logfile", "", "specify a file to write the logs to")
+	timeout       = flag.Int("timeout", 100, "specify the timeout for round trips in milliseconds")
 )
 
 func main() {
