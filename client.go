@@ -7,27 +7,52 @@ import (
 	"time"
 )
 
-func runClient(serverAddr string, logFile io.Writer, done chan struct{}) error {
+type ClientOptions struct {
+	Timeout          time.Duration
+	Frequency        time.Duration
+	LatencyThreshold time.Duration
+	LogFile          io.Writer
+	LatencyLogFile   io.Writer
+}
+
+type Client struct {
+	conn       net.Conn
+	serverAddr string
+	opts       ClientOptions
+}
+
+func NewClient(serverAddr string, opts *ClientOptions) (*Client, error) {
 	conn, err := net.Dial("udp", serverAddr)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer conn.Close()
 
-	fmt.Fprintf(logFile, "at %s client started connecting to %s\n", time.Now().Format(time.RFC1123), serverAddr)
+	return &Client{
+		conn:       conn,
+		serverAddr: serverAddr,
+		opts:       *opts,
+	}, nil
+}
+
+func (c *Client) Close() error {
+	return c.conn.Close()
+}
+
+func (c *Client) Run(done <-chan struct{}) {
+	fmt.Fprintf(c.opts.LogFile, "at %s client started connecting to %s\n", time.Now().Format(time.RFC1123), c.serverAddr)
 	defer func() {
-		fmt.Fprintf(logFile, "at %s client stopped connecting to %s\n", time.Now().Format(time.RFC1123), serverAddr)
+		fmt.Fprintf(c.opts.LogFile, "at %s client stopped connecting to %s\n", time.Now().Format(time.RFC1123), c.serverAddr)
 	}()
 
 	buf := make([]byte, 1024)
-	ticker := time.NewTicker(time.Duration(*timeout) * time.Millisecond)
+	ticker := time.NewTicker(c.opts.Frequency)
 
 	printErrors := true
 
 	for {
 		select {
 		case <-done:
-			return nil
+			return
 		case <-ticker.C:
 			// continue
 		}
@@ -35,28 +60,40 @@ func runClient(serverAddr string, logFile io.Writer, done chan struct{}) error {
 		t := time.Now()
 		tString := t.String()
 
-		_, err = conn.Write([]byte(tString))
+		_, err := c.conn.Write([]byte(tString))
 		if err != nil {
-			fmt.Fprintf(logFile, "write %s to server failed: %v\n", tString, err)
+			if printErrors {
+				fmt.Fprintf(c.opts.LogFile, "write %s to server failed: %v\n", tString, err)
+				printErrors = false
+			}
 			continue
 		}
 
-		conn.SetReadDeadline(t.Add(time.Duration(*timeout) * time.Millisecond))
-		n, err := conn.Read(buf)
+		c.conn.SetReadDeadline(t.Add(c.opts.Timeout))
+		n, err := c.conn.Read(buf)
 		if err != nil || string(buf[:n]) != tString {
 			if err == nil {
 				err = fmt.Errorf("the returned value %s did not match the sent one", string(buf[:n]))
 			}
 			if printErrors {
-				fmt.Fprintf(logFile, "read %s from server failed: %v\n", tString, err)
+				fmt.Fprintf(c.opts.LogFile, "read %s from server failed: %v\n", tString, err)
 				printErrors = false
 			}
 			continue
 		}
 
 		if !printErrors {
-			fmt.Fprintf(logFile, "send/read %s succeeded: error condition restored\n", tString)
+			fmt.Fprintf(c.opts.LogFile, "send/read %s succeeded: error condition resolved\n", tString)
 			printErrors = true
 		}
+
+		c.printLatency(t, time.Since(t))
+
+	}
+}
+
+func (c *Client) printLatency(t time.Time, latency time.Duration) {
+	if c.opts.LatencyLogFile != nil && latency >= c.opts.LatencyThreshold {
+		fmt.Fprintf(c.opts.LatencyLogFile, "latency at %s was %d ms\n", t.Format(time.RFC1123), latency.Milliseconds())
 	}
 }
